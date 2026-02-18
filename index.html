@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DispoKI Simple – Touren-Extraktor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.0/lucide.min.js"></script>
+    <!-- SheetJS für Excel-Support (.xlsx) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Roboto+Mono:wght@400;500&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        .mono-list {
+            font-family: 'Roboto Mono', monospace;
+            white-space: pre;
+            line-height: 1.4;
+            letter-spacing: -0.02em;
+        }
+
+        .dark-mode {
+            background-color: #0f172a;
+            color: #f1f5f9;
+        }
+
+        .dark-mode .bg-white {
+            background-color: #1e293b;
+            border-color: #334155;
+        }
+
+        .loader {
+            border-top-color: #2563eb;
+            animation: spinner 0.8s linear infinite;
+        }
+
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .list-container {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .high-reliability-badge {
+            background: linear-gradient(90deg, #2563eb, #7c3aed);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body class="transition-colors duration-200">
+
+    <div id="app" class="max-w-6xl mx-auto p-4 sm:p-6">
+        <!-- Header -->
+        <header class="flex justify-between items-center mb-6">
+            <div>
+                <h1 class="text-2xl font-bold text-blue-600 flex items-center gap-2">
+                    <i data-lucide="list-checks"></i> DispoKI <span class="text-gray-400 font-light italic text-lg">Auto-Scanner</span>
+                </h1>
+                <div class="flex items-center gap-2">
+                    <span class="high-reliability-badge">Excel & CSV Support</span>
+                    <p class="text-xs text-gray-500 uppercase font-semibold">Dynamische Erkennung</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="toggleDarkMode()" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:opacity-80 transition">
+                    <i data-lucide="moon" id="theme-icon" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Upload Bereich -->
+        <div id="upload-area" class="bg-white dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center cursor-pointer hover:border-blue-500 transition mb-6" onclick="triggerUpload()">
+            <input type="file" id="file-input" class="hidden" accept=".csv,.xlsx,.xls">
+            <div id="upload-prompt">
+                <div class="bg-blue-50 dark:bg-blue-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <i data-lucide="file-spreadsheet" class="text-blue-600 w-8 h-8"></i>
+                </div>
+                <h2 class="text-lg font-bold mb-1">Excel oder CSV einfügen</h2>
+                <p class="text-sm text-gray-500">Wähle deine Tourendispo-Datei aus</p>
+            </div>
+            
+            <div id="loader-ui" class="hidden py-4">
+                <div class="loader rounded-full border-4 border-gray-200 h-10 w-10 mx-auto mb-4"></div>
+                <p class="text-blue-600 font-bold">Lese Excel-Daten...</p>
+                <p class="text-xs text-gray-400">Analysiere Zeilen und Spalten...</p>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div id="toolbar" class="hidden flex flex-wrap gap-2 mb-4 items-center">
+            <div id="stats-badge" class="px-3 py-2 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-bold mr-auto">
+                Analysiere...
+            </div>
+            <button onclick="copyEverything()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition text-sm font-bold shadow-sm">
+                <i data-lucide="copy"></i> Alles kopieren
+            </button>
+            <button onclick="location.reload()" class="bg-gray-200 dark:bg-gray-700 px-4 py-2 rounded-lg text-sm transition font-semibold">
+                Neu laden
+            </button>
+        </div>
+
+        <!-- Resultat Liste -->
+        <div id="results-container" class="space-y-4"></div>
+
+    </div>
+
+    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-full text-sm font-bold opacity-0 transition-all pointer-events-none z-50">
+        Kopiert!
+    </div>
+
+    <script>
+        let extractedData = [];
+
+        function triggerUpload() {
+            document.getElementById('file-input').click();
+        }
+
+        document.getElementById('file-input').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            showProcessing();
+            const reader = new FileReader();
+
+            reader.onload = function(evt) {
+                const data = evt.target.result;
+                const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+                
+                // Erste Tabelle nehmen
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                
+                // In JSON konvertieren (Array von Arrays)
+                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+                processRows(rows);
+            };
+
+            reader.readAsBinaryString(file);
+        });
+
+        function processRows(rows) {
+            const grouped = {};
+            const weekdays = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+
+            rows.forEach(row => {
+                // Wir suchen nach Datumsangaben in der ersten Spalte (Index 0)
+                let rawDate = row[0];
+                
+                // Falls es ein Excel-Datumsobjekt ist
+                if (rawDate instanceof Date && !isNaN(rawDate)) {
+                    const orderNr = row[3];
+                    const kunde = row[4];
+                    const eleMenge = row[9];
+                    
+                    // Nur echte Kundenaufträge (Kunde darf nicht leer oder "Kunde" Header sein)
+                    if (kunde && kunde !== "Kunde") {
+                        const dayName = weekdays[rawDate.getDay()];
+                        const formattedDate = `${dayName}, ${rawDate.toLocaleDateString('de-DE')}`;
+
+                        if (!grouped[formattedDate]) grouped[formattedDate] = [];
+                        
+                        grouped[formattedDate].push({
+                            typ: "LIEFERUNG",
+                            kunde: String(kunde).trim(),
+                            adresse: `${row[6] || ''} ${row[7] || ''} ${row[8] || ''}`.trim(),
+                            menge: `${eleMenge || '0'} ELE`,
+                            nr: orderNr || '---'
+                        });
+                    }
+                }
+            });
+
+            extractedData = Object.keys(grouped).map(tag => ({
+                tag: tag,
+                eintraege: grouped[tag]
+            })).sort((a,b) => {
+                // Hilfssortierung nach Datum
+                const dateA = parseGermanDate(a.tag.split(', ')[1]);
+                const dateB = parseGermanDate(b.tag.split(', ')[1]);
+                return dateA - dateB;
+            });
+
+            displayResults();
+        }
+
+        function parseGermanDate(s) {
+            const parts = s.split('.');
+            return new Date(parts[2], parts[1] - 1, parts[0]);
+        }
+
+        function showProcessing() {
+            document.getElementById('upload-prompt').classList.add('hidden');
+            document.getElementById('loader-ui').classList.remove('hidden');
+        }
+
+        function displayResults() {
+            document.getElementById('upload-area').classList.add('hidden');
+            document.getElementById('toolbar').classList.remove('hidden');
+            
+            const total = extractedData.reduce((acc, d) => acc + d.eintraege.length, 0);
+            const stats = extractedData.map(d => `${d.tag.split(',')[0].substring(0,2)}: ${d.eintraege.length}`).join(', ');
+            document.getElementById('stats-badge').innerText = `Gefundene Lieferungen: ${total} (${stats})`;
+            
+            renderList(extractedData);
+            refreshIcons();
+        }
+
+        function formatLine(item) {
+            return `${item.typ.padEnd(15)}${item.kunde.padEnd(30)}${item.adresse.padEnd(35)}${item.menge.padEnd(20)}${item.nr}`;
+        }
+
+        function renderList(data) {
+            const container = document.getElementById('results-container');
+            container.innerHTML = '';
+
+            if (data.length === 0) {
+                container.innerHTML = '<div class="p-10 text-center text-gray-400">Keine gültigen Lieferungen gefunden. Bitte prüfe das Format der Datei.</div>';
+                return;
+            }
+
+            data.forEach(day => {
+                const section = document.createElement('div');
+                section.className = "bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden";
+                let dayText = day.eintraege.map(item => formatLine(item)).join('\n');
+                let separator = "─".repeat(110);
+
+                section.innerHTML = `
+                    <div class="p-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/50">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="calendar" class="w-4 h-4 text-blue-500"></i>
+                            <h2 class="font-bold text-gray-700 dark:text-gray-200 text-sm">${day.tag}</h2>
+                        </div>
+                        <button onclick="copySection(this)" class="text-blue-600 hover:text-blue-800 text-xs font-bold flex items-center gap-1">
+                            <i data-lucide="copy" class="w-3 h-3"></i> TAG KOPIEREN
+                        </button>
+                    </div>
+                    <div class="list-container p-4">
+                        <pre class="mono-list text-[10px] sm:text-[12px] text-gray-800 dark:text-gray-200">${day.tag}\n${separator}\n${dayText}</pre>
+                    </div>
+                `;
+                container.appendChild(section);
+            });
+        }
+
+        function copyToClipboard(text) {
+            const el = document.createElement('textarea');
+            el.value = text;
+            document.body.appendChild(el);
+            el.select();
+            document.execCommand('copy');
+            document.body.removeChild(el);
+            const toast = document.getElementById('toast');
+            toast.style.opacity = "1";
+            setTimeout(() => toast.style.opacity = "0", 2000);
+        }
+
+        function copySection(btn) {
+            const text = btn.closest('.bg-white').querySelector('pre').innerText;
+            copyToClipboard(text);
+        }
+
+        function copyEverything() {
+            let all = "";
+            extractedData.forEach(day => {
+                let dayText = day.eintraege.map(item => formatLine(item)).join('\n');
+                all += `${day.tag}\n${"─".repeat(110)}\n${dayText}\n\n`;
+            });
+            copyToClipboard(all);
+        }
+
+        function toggleDarkMode() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            const icon = document.getElementById('theme-icon');
+            icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
+            refreshIcons();
+        }
+
+        function refreshIcons() {
+            if (window.lucide) lucide.createIcons();
+        }
+
+        window.onload = refreshIcons;
+    </script>
+</body>
+</html>
