@@ -3,295 +3,208 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DispoKI Simple – Touren-Extraktor</title>
+    <title>Tourendispo Prozessor</title>
+    <!-- Tailwind CSS für das Design -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.0/lucide.min.js"></script>
-    <!-- SheetJS für Excel-Support (.xlsx) -->
+    <!-- React & Babel für Browser-Kompilierung -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Excel Bibliothek -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Roboto+Mono:wght@400;500&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f8fafc;
-        }
-
-        .mono-list {
-            font-family: 'Roboto Mono', monospace;
+        body { background-color: #f3f4f6; }
+        .output-text {
+            font-family: 'Calibri', sans-serif;
+            font-size: 11pt;
             white-space: pre;
-            line-height: 1.4;
-            letter-spacing: -0.02em;
-        }
-
-        .dark-mode {
-            background-color: #0f172a;
-            color: #f1f5f9;
-        }
-
-        .dark-mode .bg-white {
-            background-color: #1e293b;
-            border-color: #334155;
-        }
-
-        .loader {
-            border-top-color: #2563eb;
-            animation: spinner 0.8s linear infinite;
-        }
-
-        @keyframes spinner {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .list-container {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        .high-reliability-badge {
-            background: linear-gradient(90deg, #2563eb, #7c3aed);
-            color: white;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: bold;
-            text-transform: uppercase;
+            text-align: left;
+            color: #000000;
         }
     </style>
 </head>
-<body class="transition-colors duration-200">
+<body>
+    <div id="root"></div>
 
-    <div id="app" class="max-w-6xl mx-auto p-4 sm:p-6">
-        <!-- Header -->
-        <header class="flex justify-between items-center mb-6">
-            <div>
-                <h1 class="text-2xl font-bold text-blue-600 flex items-center gap-2">
-                    <i data-lucide="list-checks"></i> DispoKI <span class="text-gray-400 font-light italic text-lg">Auto-Scanner</span>
-                </h1>
-                <div class="flex items-center gap-2">
-                    <span class="high-reliability-badge">Excel & CSV Support</span>
-                    <p class="text-xs text-gray-500 uppercase font-semibold">Dynamische Erkennung</p>
-                </div>
-            </div>
-            <div class="flex gap-2">
-                <button onclick="toggleDarkMode()" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700 hover:opacity-80 transition">
-                    <i data-lucide="moon" id="theme-icon" class="w-5 h-5"></i>
-                </button>
-            </div>
-        </header>
+    <script type="text/babel">
+        const { useState, useRef, useEffect } = React;
 
-        <!-- Upload Bereich -->
-        <div id="upload-area" class="bg-white dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center cursor-pointer hover:border-blue-500 transition mb-6" onclick="triggerUpload()">
-            <input type="file" id="file-input" class="hidden" accept=".csv,.xlsx,.xls">
-            <div id="upload-prompt">
-                <div class="bg-blue-50 dark:bg-blue-900/30 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i data-lucide="file-spreadsheet" class="text-blue-600 w-8 h-8"></i>
-                </div>
-                <h2 class="text-lg font-bold mb-1">Excel oder CSV einfügen</h2>
-                <p class="text-sm text-gray-500">Wähle deine Tourendispo-Datei aus</p>
-            </div>
-            
-            <div id="loader-ui" class="hidden py-4">
-                <div class="loader rounded-full border-4 border-gray-200 h-10 w-10 mx-auto mb-4"></div>
-                <p class="text-blue-600 font-bold">Lese Excel-Daten...</p>
-                <p class="text-xs text-gray-400">Analysiere Zeilen und Spalten...</p>
-            </div>
-        </div>
+        const excelDateToJSDate = (serial) => {
+            const utc_days = Math.floor(serial - 25569);
+            const utc_value = utc_days * 86400;
+            const date_info = new Date(utc_value * 1000);
+            const fractional_day = serial - Math.floor(serial) + 0.0000001;
+            let total_seconds = Math.floor(86400 * fractional_day);
+            const seconds = total_seconds % 60;
+            total_seconds -= seconds;
+            const hours = Math.floor(total_seconds / (60 * 60));
+            const minutes = Math.floor(total_seconds / 60) % 60;
+            return new Date(date_info.getFullYear(), date_info.getMonth(), date_info.getDate(), hours, minutes, seconds);
+        };
 
-        <!-- Toolbar -->
-        <div id="toolbar" class="hidden flex flex-wrap gap-2 mb-4 items-center">
-            <div id="stats-badge" class="px-3 py-2 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-lg text-xs font-bold mr-auto">
-                Analysiere...
-            </div>
-            <button onclick="copyEverything()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition text-sm font-bold shadow-sm">
-                <i data-lucide="copy"></i> Alles kopieren
-            </button>
-            <button onclick="location.reload()" class="bg-gray-200 dark:bg-gray-700 px-4 py-2 rounded-lg text-sm transition font-semibold">
-                Neu laden
-            </button>
-        </div>
+        const App = () => {
+            const [data, setData] = useState(null);
+            const [loading, setLoading] = useState(false);
+            const [error, setError] = useState(null);
+            const fileInputRef = useRef(null);
 
-        <!-- Resultat Liste -->
-        <div id="results-container" class="space-y-4"></div>
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                setLoading(true);
+                setError(null);
 
-    </div>
-
-    <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 bg-black/80 text-white px-6 py-3 rounded-full text-sm font-bold opacity-0 transition-all pointer-events-none z-50">
-        Kopiert!
-    </div>
-
-    <script>
-        let extractedData = [];
-
-        function triggerUpload() {
-            document.getElementById('file-input').click();
-        }
-
-        document.getElementById('file-input').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            showProcessing();
-            const reader = new FileReader();
-
-            reader.onload = function(evt) {
-                const data = evt.target.result;
-                const workbook = XLSX.read(data, { type: 'binary', cellDates: true });
-                
-                // Erste Tabelle nehmen
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                
-                // In JSON konvertieren (Array von Arrays)
-                const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
-                processRows(rows);
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    try {
+                        const bstr = evt.target.result;
+                        const wb = XLSX.read(bstr, { type: 'binary' });
+                        const ws = wb.Sheets[wb.SheetNames[0]];
+                        const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+                        processExcelData(jsonData);
+                    } catch (err) {
+                        setError("Fehler beim Verarbeiten der Datei.");
+                        setLoading(false);
+                    }
+                };
+                reader.readAsBinaryString(file);
             };
 
-            reader.readAsBinaryString(file);
-        });
+            const processExcelData = (rows) => {
+                if (rows.length < 5) {
+                    setError("Die Datei enthält zu wenig Daten.");
+                    setLoading(false);
+                    return;
+                }
 
-        function processRows(rows) {
-            const grouped = {};
-            const weekdays = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
-
-            rows.forEach(row => {
-                // Wir suchen nach Datumsangaben in der ersten Spalte (Index 0)
-                let rawDate = row[0];
+                let colMap = { date: 0, memo: 2, order: 3, customer: 4, project: 5, street: 9, zip: 10, city: 11 };
                 
-                // Falls es ein Excel-Datumsobjekt ist
-                if (rawDate instanceof Date && !isNaN(rawDate)) {
-                    const orderNr = row[3];
-                    const kunde = row[4];
-                    const eleMenge = row[9];
-                    
-                    // Nur echte Kundenaufträge (Kunde darf nicht leer oder "Kunde" Header sein)
-                    if (kunde && kunde !== "Kunde") {
-                        const dayName = weekdays[rawDate.getDay()];
-                        const formattedDate = `${dayName}, ${rawDate.toLocaleDateString('de-DE')}`;
+                for (let i = 0; i < Math.min(rows.length, 15); i++) {
+                    const row = rows[i];
+                    if (!row) continue;
+                    row.forEach((cell, idx) => {
+                        const val = String(cell).toLowerCase().trim();
+                        if (val === "lieferdatum") colMap.date = idx;
+                        if (val === "memo") colMap.memo = idx;
+                        if (val === "auftrag") colMap.order = idx;
+                        if (val === "kunde") colMap.customer = idx;
+                        if (val === "projekt") colMap.project = idx;
+                        if (val === "strasse") colMap.street = idx;
+                        if (val === "plz") colMap.zip = idx;
+                        if (val === "ort") colMap.city = idx;
+                    });
+                }
 
-                        if (!grouped[formattedDate]) grouped[formattedDate] = [];
-                        
-                        grouped[formattedDate].push({
-                            typ: "LIEFERUNG",
-                            kunde: String(kunde).trim(),
-                            adresse: `${row[6] || ''} ${row[7] || ''} ${row[8] || ''}`.trim(),
-                            menge: `${eleMenge || '0'} ELE`,
-                            nr: orderNr || '---'
-                        });
+                const deliveryGroups = {
+                    1: { name: "Montag", items: [], date: null },
+                    2: { name: "Dienstag", items: [], date: null },
+                    3: { name: "Mittwoch", items: [], date: null },
+                    4: { name: "Donnerstag", items: [], date: null },
+                    5: { name: "Freitag", items: [], date: null }
+                };
+
+                const SPACES = " ".repeat(30);
+
+                for (let i = 9; i < rows.length; i++) {
+                    const row = rows[i];
+                    if (!row || row.length < 2) continue;
+
+                    const rawDate = row[colMap.date];
+                    if (rawDate) {
+                        const date = typeof rawDate === 'number' ? excelDateToJSDate(rawDate) : new Date(rawDate);
+                        if (!isNaN(date.getTime())) {
+                            const dayOfWeek = date.getDay();
+                            if (deliveryGroups[dayOfWeek]) {
+                                if (!deliveryGroups[dayOfWeek].date) deliveryGroups[dayOfWeek].date = date;
+
+                                const fixed = "LIEFERUNG";
+                                const block1 = (row[colMap.customer] || "").toString().trim();
+                                const strasse = (row[colMap.street] || "").toString().trim();
+                                const plz = (row[colMap.zip] || "").toString().trim();
+                                const ort = (row[colMap.city] || "").toString().trim();
+                                
+                                let block2 = "KEINE ADRESSE GEFUNDEN";
+                                if (strasse || plz || ort) {
+                                    block2 = `${strasse}, ${plz} ${ort}`.trim().replace(/^, /, "");
+                                }
+
+                                const block3 = (row[colMap.memo] || "").toString().trim();
+                                const auftragNum = (row[colMap.order] || "").toString().trim();
+                                const block5 = `${auftragNum}/SLI`;
+
+                                const formattedLine = `${fixed}${SPACES}${block1}${SPACES}${block2}${SPACES}${block3}${SPACES}${block5}`;
+                                deliveryGroups[dayOfWeek].items.push(formattedLine);
+                            }
+                        }
                     }
                 }
-            });
 
-            extractedData = Object.keys(grouped).map(tag => ({
-                tag: tag,
-                eintraege: grouped[tag]
-            })).sort((a,b) => {
-                // Hilfssortierung nach Datum
-                const dateA = parseGermanDate(a.tag.split(', ')[1]);
-                const dateB = parseGermanDate(b.tag.split(', ')[1]);
-                return dateA - dateB;
-            });
+                setData([1, 2, 3, 4, 5].map(day => deliveryGroups[day]));
+                setLoading(false);
+            };
 
-            displayResults();
-        }
+            const formatDate = (date) => {
+                if (!date) return "";
+                return `${String(date.getDate()).padStart(2, '0')}.${String(date.getMonth() + 1).padStart(2, '0')}.${date.getFullYear()}`;
+            };
 
-        function parseGermanDate(s) {
-            const parts = s.split('.');
-            return new Date(parts[2], parts[1] - 1, parts[0]);
-        }
+            const handleCopy = () => {
+                const text = document.getElementById('output-area').innerText;
+                const textArea = document.createElement("textarea");
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+            };
 
-        function showProcessing() {
-            document.getElementById('upload-prompt').classList.add('hidden');
-            document.getElementById('loader-ui').classList.remove('hidden');
-        }
-
-        function displayResults() {
-            document.getElementById('upload-area').classList.add('hidden');
-            document.getElementById('toolbar').classList.remove('hidden');
-            
-            const total = extractedData.reduce((acc, d) => acc + d.eintraege.length, 0);
-            const stats = extractedData.map(d => `${d.tag.split(',')[0].substring(0,2)}: ${d.eintraege.length}`).join(', ');
-            document.getElementById('stats-badge').innerText = `Gefundene Lieferungen: ${total} (${stats})`;
-            
-            renderList(extractedData);
-            refreshIcons();
-        }
-
-        function formatLine(item) {
-            return `${item.typ.padEnd(15)}${item.kunde.padEnd(30)}${item.adresse.padEnd(35)}${item.menge.padEnd(20)}${item.nr}`;
-        }
-
-        function renderList(data) {
-            const container = document.getElementById('results-container');
-            container.innerHTML = '';
-
-            if (data.length === 0) {
-                container.innerHTML = '<div class="p-10 text-center text-gray-400">Keine gültigen Lieferungen gefunden. Bitte prüfe das Format der Datei.</div>';
-                return;
-            }
-
-            data.forEach(day => {
-                const section = document.createElement('div');
-                section.className = "bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 mb-6 overflow-hidden";
-                let dayText = day.eintraege.map(item => formatLine(item)).join('\n');
-                let separator = "─".repeat(110);
-
-                section.innerHTML = `
-                    <div class="p-3 border-b border-gray-100 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/50">
-                        <div class="flex items-center gap-2">
-                            <i data-lucide="calendar" class="w-4 h-4 text-blue-500"></i>
-                            <h2 class="font-bold text-gray-700 dark:text-gray-200 text-sm">${day.tag}</h2>
+            return (
+                <div className="min-h-screen p-4 md:p-8">
+                    <div className="max-w-full mx-auto bg-white rounded-2xl shadow-xl p-8">
+                        <h1 className="text-2xl font-black text-center mb-8 text-blue-900 uppercase italic">Tourendispo GitHub Edition</h1>
+                        
+                        <div 
+                            className="border-4 border-dashed border-gray-200 rounded-xl p-12 text-center mb-8 bg-gray-50 hover:border-blue-400 cursor-pointer transition-all"
+                            onClick={() => fileInputRef.current.click()}
+                        >
+                            <p className="text-lg font-bold text-gray-600">Excel-Datei hier hochladen</p>
+                            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx" className="hidden" />
                         </div>
-                        <button onclick="copySection(this)" class="text-blue-600 hover:text-blue-800 text-xs font-bold flex items-center gap-1">
-                            <i data-lucide="copy" class="w-3 h-3"></i> TAG KOPIEREN
-                        </button>
+
+                        {loading && <p className="text-center font-bold text-blue-900 animate-pulse">Verarbeite Daten...</p>}
+                        {error && <p className="text-red-500 text-center font-bold">{error}</p>}
+
+                        {data && (
+                            <div>
+                                <div className="flex justify-between items-center mb-6 bg-blue-950 p-4 rounded-xl">
+                                    <span className="text-white font-mono text-sm uppercase">30 Spaces Format</span>
+                                    <button onClick={handleCopy} className="bg-white text-blue-950 px-10 py-2 rounded-lg font-black hover:bg-gray-100 transition-all">KOPIEREN</button>
+                                </div>
+                                
+                                <div id="output-area" className="bg-white p-10 border border-gray-200 rounded-lg shadow-inner overflow-x-auto output-text">
+                                    {data.map((group, idx) => {
+                                        if (group.items.length === 0) return null;
+                                        return (
+                                            <div key={idx} className="mb-12">
+                                                <div className="font-bold border-b-2 border-blue-100 pb-2 mb-4 text-blue-900 text-lg">
+                                                    {group.name} {formatDate(group.date)} ({group.items.length} Lieferungen):
+                                                </div>
+                                                {group.items.map((item, i) => (
+                                                    <div key={i} className="py-0.5 hover:bg-gray-50">{item}</div>
+                                                ))}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
-                    <div class="list-container p-4">
-                        <pre class="mono-list text-[10px] sm:text-[12px] text-gray-800 dark:text-gray-200">${day.tag}\n${separator}\n${dayText}</pre>
-                    </div>
-                `;
-                container.appendChild(section);
-            });
-        }
+                </div>
+            );
+        };
 
-        function copyToClipboard(text) {
-            const el = document.createElement('textarea');
-            el.value = text;
-            document.body.appendChild(el);
-            el.select();
-            document.execCommand('copy');
-            document.body.removeChild(el);
-            const toast = document.getElementById('toast');
-            toast.style.opacity = "1";
-            setTimeout(() => toast.style.opacity = "0", 2000);
-        }
-
-        function copySection(btn) {
-            const text = btn.closest('.bg-white').querySelector('pre').innerText;
-            copyToClipboard(text);
-        }
-
-        function copyEverything() {
-            let all = "";
-            extractedData.forEach(day => {
-                let dayText = day.eintraege.map(item => formatLine(item)).join('\n');
-                all += `${day.tag}\n${"─".repeat(110)}\n${dayText}\n\n`;
-            });
-            copyToClipboard(all);
-        }
-
-        function toggleDarkMode() {
-            const isDark = document.body.classList.toggle('dark-mode');
-            const icon = document.getElementById('theme-icon');
-            icon.setAttribute('data-lucide', isDark ? 'sun' : 'moon');
-            refreshIcons();
-        }
-
-        function refreshIcons() {
-            if (window.lucide) lucide.createIcons();
-        }
-
-        window.onload = refreshIcons;
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
     </script>
 </body>
 </html>
