@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tourendispo Prozessor</title>
+    <title>Dispo & Montage Prozessor</title>
     <!-- Tailwind CSS für das Design -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- React & Babel für Browser-Kompilierung -->
@@ -13,13 +13,18 @@
     <!-- Excel Bibliothek -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
-        body { background-color: #f3f4f6; }
+        body { background-color: #f8fafc; }
         .output-text {
             font-family: 'Calibri', sans-serif;
             font-size: 11pt;
             white-space: pre;
             text-align: left;
             color: #000000;
+        }
+        .active-tab {
+            border-bottom: 4px solid #1e3a8a;
+            color: #1e3a8a;
+            background-color: #eff6ff;
         }
     </style>
 </head>
@@ -30,6 +35,7 @@
         const { useState, useRef, useEffect } = React;
 
         const excelDateToJSDate = (serial) => {
+            if (typeof serial !== 'number') return new Date(serial);
             const utc_days = Math.floor(serial - 25569);
             const utc_value = utc_days * 86400;
             const date_info = new Date(utc_value * 1000);
@@ -43,7 +49,9 @@
         };
 
         const App = () => {
+            const [mode, setMode] = useState('dispo'); 
             const [data, setData] = useState(null);
+            const [rawRows, setRawRows] = useState(null);
             const [loading, setLoading] = useState(false);
             const [error, setError] = useState(null);
             const fileInputRef = useRef(null);
@@ -61,7 +69,8 @@
                         const wb = XLSX.read(bstr, { type: 'binary' });
                         const ws = wb.Sheets[wb.SheetNames[0]];
                         const jsonData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-                        processExcelData(jsonData);
+                        setRawRows(jsonData);
+                        processExcelData(jsonData, mode);
                     } catch (err) {
                         setError("Fehler beim Verarbeiten der Datei.");
                         setLoading(false);
@@ -70,25 +79,29 @@
                 reader.readAsBinaryString(file);
             };
 
-            const processExcelData = (rows) => {
+            useEffect(() => {
+                if (rawRows) {
+                    processExcelData(rawRows, mode);
+                }
+            }, [mode]);
+
+            const processExcelData = (rows, currentMode) => {
                 if (rows.length < 5) {
                     setError("Die Datei enthält zu wenig Daten.");
                     setLoading(false);
                     return;
                 }
 
-                let colMap = { date: 0, memo: 2, order: 3, customer: 4, project: 5, street: 9, zip: 10, city: 11 };
-                
+                let colMap = { date: 0, memo: 2, order: 3, customer: 4, street: 9, zip: 10, city: 11 };
                 for (let i = 0; i < Math.min(rows.length, 15); i++) {
                     const row = rows[i];
                     if (!row) continue;
                     row.forEach((cell, idx) => {
                         const val = String(cell).toLowerCase().trim();
-                        if (val === "lieferdatum") colMap.date = idx;
+                        if (val.includes("datum")) colMap.date = idx;
                         if (val === "memo") colMap.memo = idx;
                         if (val === "auftrag") colMap.order = idx;
                         if (val === "kunde") colMap.customer = idx;
-                        if (val === "projekt") colMap.project = idx;
                         if (val === "strasse") colMap.street = idx;
                         if (val === "plz") colMap.zip = idx;
                         if (val === "ort") colMap.city = idx;
@@ -103,7 +116,7 @@
                     5: { name: "Freitag", items: [], date: null }
                 };
 
-                const SPACES = " ".repeat(30);
+                const DISPO_SPACES = " ".repeat(30);
 
                 for (let i = 9; i < rows.length; i++) {
                     const row = rows[i];
@@ -117,22 +130,24 @@
                             if (deliveryGroups[dayOfWeek]) {
                                 if (!deliveryGroups[dayOfWeek].date) deliveryGroups[dayOfWeek].date = date;
 
-                                const fixed = "LIEFERUNG";
-                                const block1 = (row[colMap.customer] || "").toString().trim();
+                                const kunde = (row[colMap.customer] || "").toString().trim();
                                 const strasse = (row[colMap.street] || "").toString().trim();
                                 const plz = (row[colMap.zip] || "").toString().trim();
                                 const ort = (row[colMap.city] || "").toString().trim();
+                                const rawMemo = (row[colMap.memo] || "").toString().trim();
+                                const auftrag = (row[colMap.order] || "").toString().trim();
                                 
-                                let block2 = "KEINE ADRESSE GEFUNDEN";
-                                if (strasse || plz || ort) {
-                                    block2 = `${strasse}, ${plz} ${ort}`.trim().replace(/^, /, "");
+                                const adresse = (strasse || plz || ort) ? `${strasse}, ${plz} ${ort}` : "";
+
+                                let formattedLine = "";
+                                if (currentMode === 'dispo') {
+                                    formattedLine = `LIEFERUNG${DISPO_SPACES}${kunde}${DISPO_SPACES}${adresse}${DISPO_SPACES}${rawMemo}${DISPO_SPACES}${auftrag}/SLI`;
+                                } else {
+                                    // Montage-Modus: Trennung mit / und Entfernung von Zeilenumbrüchen
+                                    const cleanMemo = rawMemo.replace(/\r?\n|\r/g, " ");
+                                    formattedLine = `${kunde} / ${adresse} / ${cleanMemo}`;
                                 }
 
-                                const block3 = (row[colMap.memo] || "").toString().trim();
-                                const auftragNum = (row[colMap.order] || "").toString().trim();
-                                const block5 = `${auftragNum}/SLI`;
-
-                                const formattedLine = `${fixed}${SPACES}${block1}${SPACES}${block2}${SPACES}${block3}${SPACES}${block5}`;
                                 deliveryGroups[dayOfWeek].items.push(formattedLine);
                             }
                         }
@@ -158,46 +173,89 @@
                 document.body.removeChild(textArea);
             };
 
+            // Sammelt alle Montage-Items in einer flachen Liste
+            const getAllMontageItems = () => {
+                if (!data) return [];
+                return data.reduce((acc, group) => [...acc, ...group.items], []);
+            };
+
             return (
-                <div className="min-h-screen p-4 md:p-8">
-                    <div className="max-w-full mx-auto bg-white rounded-2xl shadow-xl p-8">
-                        <h1 className="text-2xl font-black text-center mb-8 text-blue-900 uppercase italic">Tourendispo GitHub Edition</h1>
-                        
-                        <div 
-                            className="border-4 border-dashed border-gray-200 rounded-xl p-12 text-center mb-8 bg-gray-50 hover:border-blue-400 cursor-pointer transition-all"
-                            onClick={() => fileInputRef.current.click()}
-                        >
-                            <p className="text-lg font-bold text-gray-600">Excel-Datei hier hochladen</p>
-                            <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx" className="hidden" />
+                <div className="min-h-screen pb-20">
+                    <div className="bg-white shadow-sm mb-6 border-b">
+                        <div className="max-w-6xl mx-auto flex">
+                            <button 
+                                onClick={() => setMode('dispo')}
+                                className={`flex-1 py-4 text-center font-bold uppercase transition-all ${mode === 'dispo' ? 'active-tab' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                                🚛 Tourendispo
+                            </button>
+                            <button 
+                                onClick={() => setMode('montage')}
+                                className={`flex-1 py-4 text-center font-bold uppercase transition-all ${mode === 'montage' ? 'active-tab' : 'text-gray-400 hover:text-gray-600'}`}
+                            >
+                                🛠️ Montage
+                            </button>
                         </div>
+                    </div>
 
-                        {loading && <p className="text-center font-bold text-blue-900 animate-pulse">Verarbeite Daten...</p>}
-                        {error && <p className="text-red-500 text-center font-bold">{error}</p>}
-
-                        {data && (
-                            <div>
-                                <div className="flex justify-between items-center mb-6 bg-blue-950 p-4 rounded-xl">
-                                    <span className="text-white font-mono text-sm uppercase">30 Spaces Format</span>
-                                    <button onClick={handleCopy} className="bg-white text-blue-950 px-10 py-2 rounded-lg font-black hover:bg-gray-100 transition-all">KOPIEREN</button>
-                                </div>
-                                
-                                <div id="output-area" className="bg-white p-10 border border-gray-200 rounded-lg shadow-inner overflow-x-auto output-text">
-                                    {data.map((group, idx) => {
-                                        if (group.items.length === 0) return null;
-                                        return (
-                                            <div key={idx} className="mb-12">
-                                                <div className="font-bold border-b-2 border-blue-100 pb-2 mb-4 text-blue-900 text-lg">
-                                                    {group.name} {formatDate(group.date)} ({group.items.length} Lieferungen):
-                                                </div>
-                                                {group.items.map((item, i) => (
-                                                    <div key={i} className="py-0.5 hover:bg-gray-50">{item}</div>
-                                                ))}
-                                            </div>
-                                        );
-                                    })}
-                                </div>
+                    <div className="max-w-6xl mx-auto px-4">
+                        <div className="bg-white rounded-2xl shadow-xl p-6 md:p-10 border border-gray-100">
+                            <h1 className="text-2xl font-black text-center mb-8 text-slate-800 uppercase italic tracking-tight">
+                                {mode === 'dispo' ? 'Tourendispo Prozessor' : 'Montage Liste (Alle Aufträge)'}
+                            </h1>
+                            
+                            <div 
+                                className="border-4 border-dashed border-gray-100 rounded-xl p-10 text-center mb-8 bg-slate-50 hover:border-blue-300 cursor-pointer transition-all"
+                                onClick={() => fileInputRef.current.click()}
+                            >
+                                <p className="text-lg font-bold text-slate-500 italic">Hier Excel-Datei hochladen (.xlsx)</p>
+                                <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept=".xlsx" className="hidden" />
                             </div>
-                        )}
+
+                            {loading && <p className="text-center font-bold text-blue-600 animate-pulse">Wird umgewandelt...</p>}
+                            {error && <p className="text-red-500 text-center font-bold">{error}</p>}
+
+                            {data && (
+                                <div className="animate-in fade-in duration-500">
+                                    <div className={`flex justify-between items-center mb-6 p-4 rounded-xl ${mode === 'dispo' ? 'bg-blue-900' : 'bg-slate-800'}`}>
+                                        <span className="text-white font-mono text-xs uppercase tracking-widest font-bold">
+                                            {mode === 'dispo' ? 'Vollständige Liste mit Tagen' : 'Kompakt-Liste (Kunde / Adresse / Memo)'}
+                                        </span>
+                                        <button 
+                                            onClick={handleCopy} 
+                                            className="bg-white text-slate-900 px-8 py-2 rounded-lg font-black hover:bg-slate-100 transition-all shadow-md active:scale-95"
+                                        >
+                                            📋 KOPIEREN
+                                        </button>
+                                    </div>
+                                    
+                                    <div id="output-area" className="bg-white p-8 border border-gray-200 rounded-xl shadow-inner overflow-x-auto output-text min-h-[300px]">
+                                        {mode === 'dispo' ? (
+                                            data.map((group, idx) => {
+                                                if (group.items.length === 0) return null;
+                                                return (
+                                                    <div key={idx} className="mb-10 last:mb-0">
+                                                        <div className="font-bold border-b-2 border-slate-100 pb-2 mb-4 text-slate-700 text-lg">
+                                                            <span>{group.name} {formatDate(group.date)} ({group.items.length})</span>
+                                                        </div>
+                                                        {group.items.map((item, i) => (
+                                                            <div key={i} className="py-0.5 hover:bg-slate-50 border-b border-transparent hover:border-slate-100">{item}</div>
+                                                        ))}
+                                                    </div>
+                                                );
+                                            })
+                                        ) : (
+                                            <div className="space-y-0.5">
+                                                {getAllMontageItems().map((item, i) => (
+                                                    <div key={i} className="py-0.5 hover:bg-slate-50 border-b border-transparent hover:border-slate-100">{item}</div>
+                                                ))}
+                                                {getAllMontageItems().length === 0 && <p className="text-slate-400 italic">Keine Montagedaten gefunden.</p>}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             );
